@@ -295,12 +295,14 @@ public class Bot extends Thread {
                     }
 
                     // Send interact packet every ~7 ticks (~3 times/sec) with a random entity id
+                    // Server ignores invalid entity IDs; this is intentional to generate extra packets
                     if (wanderTickCounter % 7 == 0) {
                         int fakeEntityId = ThreadLocalRandom.current().nextInt(1, 1000);
                         client.send(new ServerboundInteractPacket(fakeEntityId, InteractAction.ATTACK, false));
                     }
 
                     // Use item every ~11 ticks (~2 times/sec)
+                    // Parameters: hand, sequence number, yaw rotation, pitch rotation
                     if (wanderTickCounter % 11 == 0) {
                         client.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, yaw, 0));
                     }
