@@ -55,6 +55,8 @@ public class Bot extends Thread {
     private boolean wandering = false;
     private Timer wanderTimer;
     private int wanderTickCounter = 0;
+    private double wanderVelY = 0;
+    private int groundTicks = 0;
 
     private static final String[] WANDER_COMMANDS = {
             "/help", "/list", "/spawn", "/tps", "/ping", "/stats", "/me is walking around"
@@ -107,6 +109,9 @@ public class Bot extends Thread {
                         lastX = p.getPosition().getX();
                         lastY = p.getPosition().getY();
                         lastZ = p.getPosition().getZ();
+
+                        wanderVelY = 0;
+                        groundTicks = 5;
 
                         client.send(new ServerboundAcceptTeleportationPacket(p.getId()));
                     }
@@ -243,6 +248,8 @@ public class Bot extends Thread {
 
         wandering = true;
         wanderTickCounter = 0;
+        wanderVelY = 0;
+        groundTicks = 5;
         wanderTimer = new Timer(true);
         wanderTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
@@ -287,7 +294,24 @@ public class Bot extends Thread {
 
                     lastX = newX;
                     lastZ = newZ;
-                    moveTo(newX, lastY, newZ, yaw, 0);
+
+                    // Apply gravity to simulate walking on ground instead of flying.
+                    // After a server position confirmation, the bot stays on ground for a
+                    // grace period. Once expired, gravity kicks in until the server sends
+                    // a new position correction (which resets the grace period).
+                    boolean currentlyOnGround;
+                    if (groundTicks > 0) {
+                        groundTicks--;
+                        currentlyOnGround = true;
+                    } else {
+                        wanderVelY = (wanderVelY - 0.08) * 0.98;
+                        lastY += wanderVelY;
+                        currentlyOnGround = false;
+                    }
+
+                    client.send(new ServerboundMovePlayerPosRotPacket(currentlyOnGround, false, lastX, lastY, lastZ, yaw, 0));
+                    lastYaw = yaw;
+                    lastPitch = 0;
 
                     wanderTickCounter++;
 
