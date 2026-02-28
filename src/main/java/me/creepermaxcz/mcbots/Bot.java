@@ -45,6 +45,7 @@ public class Bot extends Thread {
     private float lastPitch = 0;
 
     private boolean connected;
+    private volatile int entityId = -1;
 
     private boolean manualDisconnecting = false;
 
@@ -86,6 +87,7 @@ public class Bot extends Thread {
                 public void packetReceived(Session session, Packet packet) {
                     if (packet instanceof ClientboundLoginPacket) {
                         connected = true;
+                        entityId = ((ClientboundLoginPacket) packet).getEntityId();
                         Log.info(nickname + " connected");
 
                         if (Main.joinMessages.size() > 0) {
@@ -298,7 +300,10 @@ public class Bot extends Thread {
                     // Server ignores invalid entity IDs; this is intentional to generate extra packets
                     if (wanderTickCounter % 7 == 0) {
                         int fakeEntityId = ThreadLocalRandom.current().nextInt(1, 1000);
-                        client.send(new ServerboundInteractPacket(fakeEntityId, InteractAction.ATTACK, false));
+                        // Avoid interacting with self which causes server to kick the bot
+                        if (fakeEntityId != entityId) {
+                            client.send(new ServerboundInteractPacket(fakeEntityId, InteractAction.ATTACK, false));
+                        }
                     }
 
                     // Use item every ~11 ticks (~2 times/sec)
