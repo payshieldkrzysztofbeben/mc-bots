@@ -14,6 +14,8 @@ import org.geysermc.mcprotocollib.protocol.MinecraftConstants;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.data.UnexpectedEncryptionException;
 import org.geysermc.mcprotocollib.protocol.data.game.ClientCommand;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.InteractAction;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerCombatKillPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
@@ -51,6 +53,11 @@ public class Bot extends Thread {
     private double wanderDirX, wanderDirZ;
     private boolean wandering = false;
     private Timer wanderTimer;
+    private int wanderTickCounter = 0;
+
+    private static final String[] WANDER_COMMANDS = {
+            "/help", "/list", "/spawn", "/tps", "/ping", "/stats", "/me is walking around"
+    };
 
     public Bot(MinecraftProtocol protocol, InetSocketAddress address, ProxyInfo proxy) {
         this.nickname = protocol.getProfile().getName();
@@ -233,6 +240,7 @@ public class Bot extends Thread {
         wanderDirZ = Math.sin(angle);
 
         wandering = true;
+        wanderTickCounter = 0;
         wanderTimer = new Timer(true);
         wanderTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
@@ -278,6 +286,30 @@ public class Bot extends Thread {
                     lastX = newX;
                     lastZ = newZ;
                     moveTo(newX, lastY, newZ, yaw, 0);
+
+                    wanderTickCounter++;
+
+                    // Swing arm every ~5 ticks (4 times/sec)
+                    if (wanderTickCounter % 5 == 0) {
+                        client.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+                    }
+
+                    // Send interact packet every ~7 ticks (~3 times/sec) with a random entity id
+                    if (wanderTickCounter % 7 == 0) {
+                        int fakeEntityId = ThreadLocalRandom.current().nextInt(1, 1000);
+                        client.send(new ServerboundInteractPacket(fakeEntityId, InteractAction.ATTACK, false));
+                    }
+
+                    // Use item every ~11 ticks (~2 times/sec)
+                    if (wanderTickCounter % 11 == 0) {
+                        client.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, yaw, 0));
+                    }
+
+                    // Send a random command every ~600 ticks (~30 sec)
+                    if (wanderTickCounter % 600 == 0) {
+                        String cmd = WANDER_COMMANDS[ThreadLocalRandom.current().nextInt(WANDER_COMMANDS.length)];
+                        sendChat(cmd);
+                    }
                 } catch (Exception ignored) {
                     // Prevent timer from dying on transient errors
                 }
