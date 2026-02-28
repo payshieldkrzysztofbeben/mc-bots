@@ -26,6 +26,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.*;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -48,7 +49,6 @@ public class Bot extends Thread {
     private int wanderRadius;
     private boolean wandering = false;
     private Timer wanderTimer;
-    private final Random wanderRandom = new Random();
 
     public Bot(MinecraftProtocol protocol, InetSocketAddress address, ProxyInfo proxy) {
         this.nickname = protocol.getProfile().getName();
@@ -219,7 +219,7 @@ public class Bot extends Thread {
         this.originZ = lastZ;
         pickNewTarget();
         wandering = true;
-        wanderTimer = new Timer();
+        wanderTimer = new Timer(true);
         wanderTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
@@ -255,8 +255,8 @@ public class Bot extends Thread {
     }
 
     private void pickNewTarget() {
-        double angle = wanderRandom.nextDouble() * 2 * Math.PI;
-        double distance = wanderRandom.nextDouble() * wanderRadius;
+        double angle = ThreadLocalRandom.current().nextDouble() * 2 * Math.PI;
+        double distance = ThreadLocalRandom.current().nextDouble() * wanderRadius;
         targetX = originX + Math.cos(angle) * distance;
         targetZ = originZ + Math.sin(angle) * distance;
     }
