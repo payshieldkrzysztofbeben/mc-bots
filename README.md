@@ -50,7 +50,9 @@ Commands can be typed to the console. They are prefixed with `.` or `!`.
 Without the prefix it will be sent as a chat message!  
 `.list` or `.ls` - list all connected bots  
 `.control <nick>` or `.ctrl <nick>` - select one or multiple bots to control  
-`.exit <limit>` or `.leave <limit>` - disconnect all or specified number of bots   
+`.exit <limit>` or `.leave <limit>` - disconnect all or specified number of bots  
+`.wander <radius>` - make bots wander randomly within the specified number of blocks from their current position  
+`.wander stop` - stop bots from wandering  
 
 ## ⚠ DISCLAIMER
 **This app is made for educational and testing purposes only.  

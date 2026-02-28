@@ -43,6 +43,13 @@ public class Bot extends Thread {
 
     private boolean manualDisconnecting = false;
 
+    private double originX, originZ;
+    private double targetX, targetZ;
+    private int wanderRadius;
+    private boolean wandering = false;
+    private Timer wanderTimer;
+    private final Random wanderRandom = new Random();
+
     public Bot(MinecraftProtocol protocol, InetSocketAddress address, ProxyInfo proxy) {
         this.nickname = protocol.getProfile().getName();
         this.address = address;
@@ -205,12 +212,62 @@ public class Bot extends Thread {
         client.send(new ServerboundMovePlayerPosPacket(true, false, x, y, z));
     }
 
+    public void startWander(int radius) {
+        stopWander();
+        this.wanderRadius = radius;
+        this.originX = lastX;
+        this.originZ = lastZ;
+        pickNewTarget();
+        wandering = true;
+        wanderTimer = new Timer();
+        wanderTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                if (!connected || !wandering) return;
+
+                double dx = targetX - lastX;
+                double dz = targetZ - lastZ;
+                double dist = Math.sqrt(dx * dx + dz * dz);
+
+                if (dist < 0.5) {
+                    pickNewTarget();
+                    return;
+                }
+
+                double step = Math.min(0.3, dist);
+                double moveX = (dx / dist) * step;
+                double moveZ = (dz / dist) * step;
+                move(moveX, 0, moveZ);
+            }
+        }, 0, 100);
+    }
+
+    public void stopWander() {
+        wandering = false;
+        if (wanderTimer != null) {
+            wanderTimer.cancel();
+            wanderTimer = null;
+        }
+    }
+
+    public boolean isWandering() {
+        return wandering;
+    }
+
+    private void pickNewTarget() {
+        double angle = wanderRandom.nextDouble() * 2 * Math.PI;
+        double distance = wanderRandom.nextDouble() * wanderRadius;
+        targetX = originX + Math.cos(angle) * distance;
+        targetZ = originZ + Math.sin(angle) * distance;
+    }
+
     public boolean isConnected() {
         return connected;
     }
 
     public void disconnect()
     {
+        stopWander();
         manualDisconnecting = true;
         client.disconnect("Leaving");
     }
