@@ -51,7 +51,7 @@ Without the prefix it will be sent as a chat message!
 `.list` or `.ls` - list all connected bots  
 `.control <nick>` or `.ctrl <nick>` - select one or multiple bots to control  
 `.exit <limit>` or `.leave <limit>` - disconnect all or specified number of bots  
-`.wander <radius>` - make bots walk back and forth within the specified radius (in blocks) from their current position  
+`.wander <radius>` - make bots walk freely and continuously within the specified radius (in blocks) from their current position  
 `.wander stop` - stop bots from wandering  
 
 ## ⚠ DISCLAIMER

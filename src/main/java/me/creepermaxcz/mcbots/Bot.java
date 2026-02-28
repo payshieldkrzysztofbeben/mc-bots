@@ -238,32 +238,49 @@ public class Bot extends Thread {
             @Override
             public void run() {
                 if (!connected || !wandering) return;
+                try {
+                    // Minecraft walking speed: ~4.317 blocks/sec
+                    // Tick interval: 50ms (20 ticks/sec)
+                    // Step per tick: 4.317 / 20 ≈ 0.216 blocks
+                    double stepPerTick = 0.216;
 
-                // Minecraft walking speed: ~4.317 blocks/sec
-                // Tick interval: 50ms (20 ticks/sec)
-                // Step per tick: 4.317 / 20 ≈ 0.216 blocks
-                double stepPerTick = 0.216;
+                    double newX = lastX + wanderDirX * stepPerTick;
+                    double newZ = lastZ + wanderDirZ * stepPerTick;
 
-                double newX = lastX + wanderDirX * stepPerTick;
-                double newZ = lastZ + wanderDirZ * stepPerTick;
+                    // Check if new position is outside radius from origin
+                    double dx = newX - originX;
+                    double dz = newZ - originZ;
+                    if (dx * dx + dz * dz > (double) wanderRadius * wanderRadius) {
+                        // Pick a new random direction pointing back toward the origin
+                        double toOriginX = originX - lastX;
+                        double toOriginZ = originZ - lastZ;
+                        double dist = Math.sqrt(toOriginX * toOriginX + toOriginZ * toOriginZ);
+                        if (dist > 0) {
+                            // Base angle toward origin, randomized ±60° for natural movement
+                            double baseAngle = Math.atan2(toOriginZ, toOriginX);
+                            double offset = (ThreadLocalRandom.current().nextDouble() - 0.5) * Math.toRadians(120);
+                            double newAngle = baseAngle + offset;
+                            wanderDirX = Math.cos(newAngle);
+                            wanderDirZ = Math.sin(newAngle);
+                        } else {
+                            // At origin, pick a completely random direction
+                            double newAngle = ThreadLocalRandom.current().nextDouble() * 2 * Math.PI;
+                            wanderDirX = Math.cos(newAngle);
+                            wanderDirZ = Math.sin(newAngle);
+                        }
+                        newX = lastX + wanderDirX * stepPerTick;
+                        newZ = lastZ + wanderDirZ * stepPerTick;
+                    }
 
-                // Check if new position is outside radius from origin
-                double dx = newX - originX;
-                double dz = newZ - originZ;
-                if (dx * dx + dz * dz > (double) wanderRadius * wanderRadius) {
-                    // Reverse direction (turn around)
-                    wanderDirX = -wanderDirX;
-                    wanderDirZ = -wanderDirZ;
-                    newX = lastX + wanderDirX * stepPerTick;
-                    newZ = lastZ + wanderDirZ * stepPerTick;
+                    // Yaw faces the direction of movement
+                    float yaw = (float) Math.toDegrees(Math.atan2(-wanderDirX, wanderDirZ));
+
+                    lastX = newX;
+                    lastZ = newZ;
+                    moveTo(newX, lastY, newZ, yaw, 0);
+                } catch (Exception ignored) {
+                    // Prevent timer from dying on transient errors
                 }
-
-                // Yaw faces the direction of movement
-                float yaw = (float) Math.toDegrees(Math.atan2(-wanderDirX, wanderDirZ));
-
-                lastX = newX;
-                lastZ = newZ;
-                moveTo(newX, lastY, newZ, yaw, 0);
             }
         }, 0, 50);
     }
