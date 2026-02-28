@@ -26,6 +26,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.*;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -47,7 +48,7 @@ public class Bot extends Thread {
 
     private double originX, originZ;
     private int wanderRadius;
-    private double wanderAngle;
+    private double wanderDirX, wanderDirZ;
     private boolean wandering = false;
     private Timer wanderTimer;
 
@@ -225,7 +226,12 @@ public class Bot extends Thread {
         this.wanderRadius = radius;
         this.originX = lastX;
         this.originZ = lastZ;
-        this.wanderAngle = 0;
+
+        // Pick a random walking direction
+        double angle = ThreadLocalRandom.current().nextDouble() * 2 * Math.PI;
+        wanderDirX = Math.cos(angle);
+        wanderDirZ = Math.sin(angle);
+
         wandering = true;
         wanderTimer = new Timer(true);
         wanderTimer.scheduleAtFixedRate(new TimerTask() {
@@ -235,20 +241,25 @@ public class Bot extends Thread {
 
                 // Minecraft walking speed: ~4.317 blocks/sec
                 // Tick interval: 50ms (20 ticks/sec)
-                // Arc length per tick: 4.317 / 20 ≈ 0.216 blocks
+                // Step per tick: 4.317 / 20 ≈ 0.216 blocks
                 double stepPerTick = 0.216;
-                double angularStep = stepPerTick / wanderRadius;
-                wanderAngle += angularStep;
-                if (wanderAngle > 2 * Math.PI) {
-                    wanderAngle -= 2 * Math.PI;
+
+                double newX = lastX + wanderDirX * stepPerTick;
+                double newZ = lastZ + wanderDirZ * stepPerTick;
+
+                // Check if new position is outside radius from origin
+                double dx = newX - originX;
+                double dz = newZ - originZ;
+                if (dx * dx + dz * dz > (double) wanderRadius * wanderRadius) {
+                    // Reverse direction (turn around)
+                    wanderDirX = -wanderDirX;
+                    wanderDirZ = -wanderDirZ;
+                    newX = lastX + wanderDirX * stepPerTick;
+                    newZ = lastZ + wanderDirZ * stepPerTick;
                 }
 
-                double newX = originX + wanderRadius * Math.cos(wanderAngle);
-                double newZ = originZ + wanderRadius * Math.sin(wanderAngle);
-
-                // Yaw faces the direction of movement (tangent to the circle)
-                // Tangent direction: (-sin(angle), cos(angle))
-                float yaw = (float) Math.toDegrees(Math.atan2(Math.sin(wanderAngle), Math.cos(wanderAngle)));
+                // Yaw faces the direction of movement
+                float yaw = (float) Math.toDegrees(Math.atan2(-wanderDirX, wanderDirZ));
 
                 lastX = newX;
                 lastZ = newZ;
