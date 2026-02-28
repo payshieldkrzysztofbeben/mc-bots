@@ -26,7 +26,6 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.*;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,14 +38,16 @@ public class Bot extends Thread {
     private boolean hasMainListener;
 
     private double lastX, lastY, lastZ = -1;
+    private float lastYaw = 0;
+    private float lastPitch = 0;
 
     private boolean connected;
 
     private boolean manualDisconnecting = false;
 
     private double originX, originZ;
-    private double targetX, targetZ;
     private int wanderRadius;
+    private double wanderAngle;
     private boolean wandering = false;
     private Timer wanderTimer;
 
@@ -209,7 +210,14 @@ public class Bot extends Thread {
 
     public void moveTo(double x, double y, double z)
     {
-        client.send(new ServerboundMovePlayerPosPacket(true, false, x, y, z));
+        client.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, lastYaw, lastPitch));
+    }
+
+    public void moveTo(double x, double y, double z, float yaw, float pitch)
+    {
+        lastYaw = yaw;
+        lastPitch = pitch;
+        client.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, yaw, pitch));
     }
 
     public void startWander(int radius) {
@@ -217,7 +225,7 @@ public class Bot extends Thread {
         this.wanderRadius = radius;
         this.originX = lastX;
         this.originZ = lastZ;
-        pickNewTarget();
+        this.wanderAngle = 0;
         wandering = true;
         wanderTimer = new Timer(true);
         wanderTimer.scheduleAtFixedRate(new TimerTask() {
@@ -225,21 +233,28 @@ public class Bot extends Thread {
             public void run() {
                 if (!connected || !wandering) return;
 
-                double dx = targetX - lastX;
-                double dz = targetZ - lastZ;
-                double dist = Math.sqrt(dx * dx + dz * dz);
-
-                if (dist < 0.5) {
-                    pickNewTarget();
-                    return;
+                // Minecraft walking speed: ~4.317 blocks/sec
+                // Tick interval: 50ms (20 ticks/sec)
+                // Arc length per tick: 4.317 / 20 ≈ 0.216 blocks
+                double stepPerTick = 0.216;
+                double angularStep = stepPerTick / wanderRadius;
+                wanderAngle += angularStep;
+                if (wanderAngle > 2 * Math.PI) {
+                    wanderAngle -= 2 * Math.PI;
                 }
 
-                double step = Math.min(0.3, dist);
-                double moveX = (dx / dist) * step;
-                double moveZ = (dz / dist) * step;
-                move(moveX, 0, moveZ);
+                double newX = originX + wanderRadius * Math.cos(wanderAngle);
+                double newZ = originZ + wanderRadius * Math.sin(wanderAngle);
+
+                // Yaw faces the direction of movement (tangent to the circle)
+                // Tangent direction: (-sin(angle), cos(angle))
+                float yaw = (float) Math.toDegrees(Math.atan2(Math.sin(wanderAngle), Math.cos(wanderAngle)));
+
+                lastX = newX;
+                lastZ = newZ;
+                moveTo(newX, lastY, newZ, yaw, 0);
             }
-        }, 0, 100);
+        }, 0, 50);
     }
 
     public void stopWander() {
@@ -252,13 +267,6 @@ public class Bot extends Thread {
 
     public boolean isWandering() {
         return wandering;
-    }
-
-    private void pickNewTarget() {
-        double angle = ThreadLocalRandom.current().nextDouble() * 2 * Math.PI;
-        double distance = ThreadLocalRandom.current().nextDouble() * wanderRadius;
-        targetX = originX + Math.cos(angle) * distance;
-        targetZ = originZ + Math.sin(angle) * distance;
     }
 
     public boolean isConnected() {
