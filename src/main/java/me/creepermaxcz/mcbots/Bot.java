@@ -51,12 +51,16 @@ public class Bot extends Thread {
 
     private double originX, originZ;
     private int wanderRadius;
-    private double wanderDirX, wanderDirZ;
     private boolean wandering = false;
     private Timer wanderTimer;
     private int wanderTickCounter = 0;
     private double wanderVelY = 0;
     private int groundTicks = 0;
+
+    // Star of David path: 12 vertices of the hexagram outline
+    private static final int STAR_VERTEX_COUNT = 12;
+    private double[] starX, starZ;
+    private int starTargetIndex = 0;
 
     private static final String[] WANDER_COMMANDS = {
             "/help", "/list", "/spawn", "/tps", "/ping", "/stats", "/me is walking around"
@@ -241,10 +245,19 @@ public class Bot extends Thread {
         this.originX = lastX;
         this.originZ = lastZ;
 
-        // Pick a random walking direction
-        double angle = ThreadLocalRandom.current().nextDouble() * 2 * Math.PI;
-        wanderDirX = Math.cos(angle);
-        wanderDirZ = Math.sin(angle);
+        // Compute 12 vertices of the Star of David (hexagram) outline.
+        // Alternating outer tips (at distance radius) and inner concavity
+        // points (at distance radius / sqrt(3)), spaced 30 degrees apart.
+        double innerRadius = radius / Math.sqrt(3);
+        starX = new double[STAR_VERTEX_COUNT];
+        starZ = new double[STAR_VERTEX_COUNT];
+        for (int i = 0; i < STAR_VERTEX_COUNT; i++) {
+            double angle = Math.PI / 2 - i * Math.PI / 6;
+            double r = (i % 2 == 0) ? radius : innerRadius;
+            starX[i] = originX + r * Math.cos(angle);
+            starZ[i] = originZ - r * Math.sin(angle);
+        }
+        starTargetIndex = 0;
 
         wandering = true;
         wanderTickCounter = 0;
@@ -261,36 +274,31 @@ public class Bot extends Thread {
                     // Step per tick: 4.317 / 20 ≈ 0.216 blocks
                     double stepPerTick = 0.216;
 
-                    double newX = lastX + wanderDirX * stepPerTick;
-                    double newZ = lastZ + wanderDirZ * stepPerTick;
+                    // Move toward the current target vertex of the star
+                    double targetX = starX[starTargetIndex];
+                    double targetZ = starZ[starTargetIndex];
+                    double dx = targetX - lastX;
+                    double dz = targetZ - lastZ;
+                    double dist = Math.sqrt(dx * dx + dz * dz);
 
-                    // Check if new position is outside radius from origin
-                    double dx = newX - originX;
-                    double dz = newZ - originZ;
-                    if (dx * dx + dz * dz > (double) wanderRadius * wanderRadius) {
-                        // Pick a new random direction pointing back toward the origin
-                        double toOriginX = originX - lastX;
-                        double toOriginZ = originZ - lastZ;
-                        double dist = Math.sqrt(toOriginX * toOriginX + toOriginZ * toOriginZ);
-                        if (dist > 0) {
-                            // Base angle toward origin, randomized ±60° for natural movement
-                            double baseAngle = Math.atan2(toOriginZ, toOriginX);
-                            double offset = (ThreadLocalRandom.current().nextDouble() - 0.5) * Math.toRadians(120);
-                            double newAngle = baseAngle + offset;
-                            wanderDirX = Math.cos(newAngle);
-                            wanderDirZ = Math.sin(newAngle);
-                        } else {
-                            // At origin, pick a completely random direction
-                            double newAngle = ThreadLocalRandom.current().nextDouble() * 2 * Math.PI;
-                            wanderDirX = Math.cos(newAngle);
-                            wanderDirZ = Math.sin(newAngle);
-                        }
-                        newX = lastX + wanderDirX * stepPerTick;
-                        newZ = lastZ + wanderDirZ * stepPerTick;
+                    double newX, newZ;
+                    if (dist <= stepPerTick) {
+                        // Reached the vertex, advance to the next one
+                        newX = targetX;
+                        newZ = targetZ;
+                        starTargetIndex = (starTargetIndex + 1) % STAR_VERTEX_COUNT;
+                    } else {
+                        // Walk toward the target
+                        double dirX = dx / dist;
+                        double dirZ = dz / dist;
+                        newX = lastX + dirX * stepPerTick;
+                        newZ = lastZ + dirZ * stepPerTick;
                     }
 
                     // Yaw faces the direction of movement
-                    float yaw = (float) Math.toDegrees(Math.atan2(-wanderDirX, wanderDirZ));
+                    double moveDirX = newX - lastX;
+                    double moveDirZ = newZ - lastZ;
+                    float yaw = (float) Math.toDegrees(Math.atan2(-moveDirX, moveDirZ));
 
                     lastX = newX;
                     lastZ = newZ;
