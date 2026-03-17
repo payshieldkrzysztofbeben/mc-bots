@@ -482,6 +482,31 @@ public class Main {
                             bot.disconnect();
                         }
                     }
+                } else if (commandName.equalsIgnoreCase("wander")) {
+                    if (split.length >= 2 && split[1].equalsIgnoreCase("stop")) {
+                        Collection<Bot> targets = controlledBots.isEmpty() ? bots : controlledBots;
+                        targets.forEach(Bot::stopWander);
+                        Log.info("Stopped wandering for " + targets.size() + " bot(s).");
+                    } else if (split.length >= 2) {
+                        try {
+                            int radius = Integer.parseInt(split[1]);
+                            if (radius < 1) {
+                                Log.warn("Radius must be at least 1.");
+                            } else {
+                                Collection<Bot> targets = controlledBots.isEmpty() ? bots : controlledBots;
+                                List<Bot> targetList = new ArrayList<>(targets);
+                                int total = targetList.size();
+                                for (int i = 0; i < total; i++) {
+                                    targetList.get(i).startWander(radius, i, total);
+                                }
+                                Log.info("Bots are now wandering within " + radius + " block(s).");
+                            }
+                        } catch (NumberFormatException e) {
+                            Log.warn("Invalid radius. Usage: .wander <radius> or .wander stop");
+                        }
+                    } else {
+                        Log.warn("Usage: .wander <radius> or .wander stop");
+                    }
                 } else {
                     Log.warn("Invalid command");
                 }

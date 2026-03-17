@@ -14,6 +14,8 @@ import org.geysermc.mcprotocollib.protocol.MinecraftConstants;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.data.UnexpectedEncryptionException;
 import org.geysermc.mcprotocollib.protocol.data.game.ClientCommand;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.InteractAction;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerCombatKillPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
@@ -26,6 +28,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.*;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -38,10 +41,30 @@ public class Bot extends Thread {
     private boolean hasMainListener;
 
     private double lastX, lastY, lastZ = -1;
+    private float lastYaw = 0;
+    private float lastPitch = 0;
 
     private boolean connected;
+    private volatile int entityId = -1;
 
     private boolean manualDisconnecting = false;
+
+    private double originX, originZ;
+    private int wanderRadius;
+    private boolean wandering = false;
+    private Timer wanderTimer;
+    private int wanderTickCounter = 0;
+    private double wanderVelY = 0;
+    private int groundTicks = 0;
+
+    // Star of David path: 12 vertices of the hexagram outline
+    private static final int STAR_VERTEX_COUNT = 12;
+    private double[] starX, starZ;
+    private int starTargetIndex = 0;
+
+    private static final String[] WANDER_COMMANDS = {
+            "/help", "/list", "/spawn", "/tps", "/ping", "/stats", "/me is walking around"
+    };
 
     public Bot(MinecraftProtocol protocol, InetSocketAddress address, ProxyInfo proxy) {
         this.nickname = protocol.getProfile().getName();
@@ -70,6 +93,7 @@ public class Bot extends Thread {
                 public void packetReceived(Session session, Packet packet) {
                     if (packet instanceof ClientboundLoginPacket) {
                         connected = true;
+                        entityId = ((ClientboundLoginPacket) packet).getEntityId();
                         Log.info(nickname + " connected");
 
                         if (Main.joinMessages.size() > 0) {
@@ -89,6 +113,9 @@ public class Bot extends Thread {
                         lastX = p.getPosition().getX();
                         lastY = p.getPosition().getY();
                         lastZ = p.getPosition().getZ();
+
+                        wanderVelY = 0;
+                        groundTicks = 5;
 
                         client.send(new ServerboundAcceptTeleportationPacket(p.getId()));
                     }
@@ -202,7 +229,177 @@ public class Bot extends Thread {
 
     public void moveTo(double x, double y, double z)
     {
-        client.send(new ServerboundMovePlayerPosPacket(true, false, x, y, z));
+        client.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, lastYaw, lastPitch));
+    }
+
+    public void moveTo(double x, double y, double z, float yaw, float pitch)
+    {
+        lastYaw = yaw;
+        lastPitch = pitch;
+        client.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, yaw, pitch));
+    }
+
+    public void startWander(int radius, int botIndex, int totalBots) {
+        stopWander();
+        this.wanderRadius = radius;
+        this.originX = lastX;
+        this.originZ = lastZ;
+
+        // Compute 12 vertices of the Star of David (hexagram) outline.
+        // Alternating outer tips (at distance radius) and inner concavity
+        // points (at distance radius / sqrt(3)), spaced 30 degrees apart.
+        double innerRadius = radius / Math.sqrt(3);
+        starX = new double[STAR_VERTEX_COUNT];
+        starZ = new double[STAR_VERTEX_COUNT];
+        for (int i = 0; i < STAR_VERTEX_COUNT; i++) {
+            double angle = Math.PI / 2 - i * Math.PI / 6;
+            double r = (i % 2 == 0) ? radius : innerRadius;
+            starX[i] = originX + r * Math.cos(angle);
+            starZ[i] = originZ - r * Math.sin(angle);
+        }
+
+        // Compute edge lengths to find total perimeter
+        double[] edgeLengths = new double[STAR_VERTEX_COUNT];
+        double totalPerimeter = 0;
+        for (int i = 0; i < STAR_VERTEX_COUNT; i++) {
+            int next = (i + 1) % STAR_VERTEX_COUNT;
+            double ex = starX[next] - starX[i];
+            double ez = starZ[next] - starZ[i];
+            edgeLengths[i] = Math.sqrt(ex * ex + ez * ez);
+            totalPerimeter += edgeLengths[i];
+        }
+
+        // Distribute bots evenly along the perimeter so they form the full star.
+        // Each bot starts at a different offset along the path.
+        double offsetDist = (totalBots > 0) ? (totalPerimeter * botIndex) / totalBots : 0;
+        double accumulated = 0;
+        starTargetIndex = 0;
+        double startX = starX[0];
+        double startZ = starZ[0];
+        for (int i = 0; i < STAR_VERTEX_COUNT; i++) {
+            if (accumulated + edgeLengths[i] >= offsetDist) {
+                double remaining = offsetDist - accumulated;
+                double frac = remaining / edgeLengths[i];
+                int next = (i + 1) % STAR_VERTEX_COUNT;
+                startX = starX[i] + frac * (starX[next] - starX[i]);
+                startZ = starZ[i] + frac * (starZ[next] - starZ[i]);
+                starTargetIndex = next;
+                break;
+            }
+            accumulated += edgeLengths[i];
+        }
+
+        // Teleport bot to its starting position on the star
+        lastX = startX;
+        lastZ = startZ;
+
+        wandering = true;
+        wanderTickCounter = 0;
+        wanderVelY = 0;
+        groundTicks = 5;
+        wanderTimer = new Timer(true);
+        wanderTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                if (!connected || !wandering) return;
+                try {
+                    // Minecraft walking speed: ~4.317 blocks/sec
+                    // Tick interval: 50ms (20 ticks/sec)
+                    // Step per tick: 4.317 / 20 ≈ 0.216 blocks
+                    double stepPerTick = 0.216;
+
+                    // Move toward the current target vertex of the star
+                    double targetX = starX[starTargetIndex];
+                    double targetZ = starZ[starTargetIndex];
+                    double dx = targetX - lastX;
+                    double dz = targetZ - lastZ;
+                    double dist = Math.sqrt(dx * dx + dz * dz);
+
+                    double newX, newZ;
+                    if (dist <= stepPerTick) {
+                        // Reached the vertex, advance to the next one
+                        newX = targetX;
+                        newZ = targetZ;
+                        starTargetIndex = (starTargetIndex + 1) % STAR_VERTEX_COUNT;
+                    } else {
+                        // Walk toward the target
+                        double dirX = dx / dist;
+                        double dirZ = dz / dist;
+                        newX = lastX + dirX * stepPerTick;
+                        newZ = lastZ + dirZ * stepPerTick;
+                    }
+
+                    // Yaw faces the direction of movement
+                    double moveDirX = newX - lastX;
+                    double moveDirZ = newZ - lastZ;
+                    float yaw = (float) Math.toDegrees(Math.atan2(-moveDirX, moveDirZ));
+
+                    lastX = newX;
+                    lastZ = newZ;
+
+                    // Apply gravity to simulate walking on ground instead of flying.
+                    // After a server position confirmation, the bot stays on ground for a
+                    // grace period. Once expired, gravity kicks in until the server sends
+                    // a new position correction (which resets the grace period).
+                    boolean currentlyOnGround;
+                    if (groundTicks > 0) {
+                        groundTicks--;
+                        currentlyOnGround = true;
+                    } else {
+                        wanderVelY = (wanderVelY - 0.08) * 0.98;
+                        lastY += wanderVelY;
+                        currentlyOnGround = false;
+                    }
+
+                    client.send(new ServerboundMovePlayerPosRotPacket(currentlyOnGround, false, lastX, lastY, lastZ, yaw, 0));
+                    lastYaw = yaw;
+                    lastPitch = 0;
+
+                    wanderTickCounter++;
+
+                    // Swing arm every ~5 ticks (4 times/sec)
+                    if (wanderTickCounter % 5 == 0) {
+                        client.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+                    }
+
+                    // Send interact packet every ~7 ticks (~3 times/sec) with a random entity id
+                    // Server ignores invalid entity IDs; this is intentional to generate extra packets
+                    if (wanderTickCounter % 7 == 0) {
+                        int fakeEntityId = ThreadLocalRandom.current().nextInt(1, 1000);
+                        // Avoid interacting with self which causes server to kick the bot
+                        if (fakeEntityId != entityId) {
+                            client.send(new ServerboundInteractPacket(fakeEntityId, InteractAction.ATTACK, false));
+                        }
+                    }
+
+                    // Use item every ~11 ticks (~2 times/sec)
+                    // Parameters: hand, sequence number, yaw rotation, pitch rotation
+                    if (wanderTickCounter % 11 == 0) {
+                        client.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, yaw, 0));
+                    }
+
+                    // Send a random command every ~600 ticks (~30 sec)
+                    if (wanderTickCounter % 600 == 0) {
+                        String cmd = WANDER_COMMANDS[ThreadLocalRandom.current().nextInt(WANDER_COMMANDS.length)];
+                        sendChat(cmd);
+                    }
+                } catch (Exception ignored) {
+                    // Prevent timer from dying on transient errors
+                }
+            }
+        }, 0, 50);
+    }
+
+    public void stopWander() {
+        wandering = false;
+        if (wanderTimer != null) {
+            wanderTimer.cancel();
+            wanderTimer = null;
+        }
+    }
+
+    public boolean isWandering() {
+        return wandering;
     }
 
     public boolean isConnected() {
@@ -211,6 +408,7 @@ public class Bot extends Thread {
 
     public void disconnect()
     {
+        stopWander();
         manualDisconnecting = true;
         client.disconnect("Leaving");
     }
