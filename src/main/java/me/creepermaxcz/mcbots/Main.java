@@ -494,7 +494,11 @@ public class Main {
                                 Log.warn("Radius must be at least 1.");
                             } else {
                                 Collection<Bot> targets = controlledBots.isEmpty() ? bots : controlledBots;
-                                targets.forEach(bot -> bot.startWander(radius));
+                                List<Bot> targetList = new ArrayList<>(targets);
+                                int total = targetList.size();
+                                for (int i = 0; i < total; i++) {
+                                    targetList.get(i).startWander(radius, i, total);
+                                }
                                 Log.info("Bots are now wandering within " + radius + " block(s).");
                             }
                         } catch (NumberFormatException e) {

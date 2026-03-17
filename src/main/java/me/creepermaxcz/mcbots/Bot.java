@@ -239,7 +239,7 @@ public class Bot extends Thread {
         client.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, yaw, pitch));
     }
 
-    public void startWander(int radius) {
+    public void startWander(int radius, int botIndex, int totalBots) {
         stopWander();
         this.wanderRadius = radius;
         this.originX = lastX;
@@ -257,7 +257,41 @@ public class Bot extends Thread {
             starX[i] = originX + r * Math.cos(angle);
             starZ[i] = originZ - r * Math.sin(angle);
         }
+
+        // Compute edge lengths to find total perimeter
+        double[] edgeLengths = new double[STAR_VERTEX_COUNT];
+        double totalPerimeter = 0;
+        for (int i = 0; i < STAR_VERTEX_COUNT; i++) {
+            int next = (i + 1) % STAR_VERTEX_COUNT;
+            double ex = starX[next] - starX[i];
+            double ez = starZ[next] - starZ[i];
+            edgeLengths[i] = Math.sqrt(ex * ex + ez * ez);
+            totalPerimeter += edgeLengths[i];
+        }
+
+        // Distribute bots evenly along the perimeter so they form the full star.
+        // Each bot starts at a different offset along the path.
+        double offsetDist = (totalBots > 0) ? (totalPerimeter * botIndex) / totalBots : 0;
+        double accumulated = 0;
         starTargetIndex = 0;
+        double startX = starX[0];
+        double startZ = starZ[0];
+        for (int i = 0; i < STAR_VERTEX_COUNT; i++) {
+            if (accumulated + edgeLengths[i] >= offsetDist) {
+                double remaining = offsetDist - accumulated;
+                double frac = remaining / edgeLengths[i];
+                int next = (i + 1) % STAR_VERTEX_COUNT;
+                startX = starX[i] + frac * (starX[next] - starX[i]);
+                startZ = starZ[i] + frac * (starZ[next] - starZ[i]);
+                starTargetIndex = next;
+                break;
+            }
+            accumulated += edgeLengths[i];
+        }
+
+        // Teleport bot to its starting position on the star
+        lastX = startX;
+        lastZ = startZ;
 
         wandering = true;
         wanderTickCounter = 0;
